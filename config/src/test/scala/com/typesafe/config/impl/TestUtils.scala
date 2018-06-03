@@ -4,12 +4,10 @@
 package com.typesafe.config.impl
 
 import org.junit.Assert._
-import org.junit._
 import com.typesafe.config.ConfigOrigin
 import java.io.Reader
 import java.io.StringReader
 import com.typesafe.config.ConfigParseOptions
-import com.typesafe.config.Config
 import com.typesafe.config.ConfigSyntax
 import com.typesafe.config.ConfigFactory
 import java.io.File
@@ -18,8 +16,11 @@ import java.io.ObjectOutputStream
 import java.io.ByteArrayInputStream
 import java.io.ObjectInputStream
 import java.io.NotSerializableException
+import java.io.OutputStream
+import java.io.InputStream
 import scala.annotation.tailrec
 import java.net.URL
+import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.Callable
 import com.typesafe.config._
@@ -429,6 +430,7 @@ abstract trait TestUtils {
         "# bar\n", // just a comment with a newline
         "# foo\n//bar", // comment then another with no newline
         """{ "foo" = 42 }""", // equals rather than colon
+        """{ "foo" = (42) }""", // value with round braces
         """{ foo { "bar" : 42 } }""", // omit the colon for object value
         """{ foo baz { "bar" : 42 } }""", // omit the colon with unquoted key with spaces
         """ "foo" : 42 """, // omit braces on root object
@@ -712,15 +714,20 @@ abstract trait TestUtils {
     def nodeOptionalSubstitution(expression: Token*) = new ConfigNodeSimpleValue(tokenOptionalSubstitution(expression: _*))
     def nodeSubstitution(expression: Token*) = new ConfigNodeSimpleValue(tokenSubstitution(expression: _*))
 
+    def isWindows: Boolean = sys.props.get("os.name").exists(_.toLowerCase(Locale.ROOT).contains("windows"))
+    def userDrive: String = if (isWindows) sys.props.get("user.dir").fold("")(_.takeWhile(_ != File.separatorChar)) else ""
+
     // this is importantly NOT using Path.newPath, which relies on
     // the parser; in the test suite we are often testing the parser,
     // so we don't want to use the parser to build the expected result.
     def path(elements: String*) = new Path(elements: _*)
 
     val resourceDir = {
-        val f = new File("config/src/test/resources")
-        if (!f.exists())
-            throw new Exception("Tests must be run from the root project directory containing " + f.getPath())
+        val f = new File("src/test/resources")
+        if (!f.exists()) {
+            val here = new File(".").getAbsolutePath
+            throw new Exception(s"Tests must be run from the root project directory containing ${f.getPath()}, however the current directory is $here")
+        }
         f
     }
 
@@ -866,7 +873,7 @@ abstract trait TestUtils {
     }
 
     protected def withScratchDirectory[T](testcase: String)(body: File => T): Unit = {
-        val target = new File("config/target")
+        val target = new File("target")
         if (!target.isDirectory)
             throw new RuntimeException(s"Expecting $target to exist")
         val suffix = java.lang.Integer.toHexString(java.util.concurrent.ThreadLocalRandom.current.nextInt)
@@ -876,6 +883,34 @@ abstract trait TestUtils {
             body(scratch)
         } finally {
             deleteRecursive(scratch)
+        }
+    }
+
+    protected def checkSerializableWithCustomSerializer[T: Manifest](o: T): T = {
+        val byteStream = new ByteArrayOutputStream()
+        val objectStream = new CustomObjectOutputStream(byteStream)
+        objectStream.writeObject(o)
+        objectStream.close()
+        val inStream = new ByteArrayInputStream(byteStream.toByteArray)
+        val inObjectStream = new CustomObjectInputStream(inStream)
+        val copy = inObjectStream.readObject()
+        inObjectStream.close()
+        copy.asInstanceOf[T]
+    }
+
+    class CustomObjectOutputStream(out: OutputStream) extends ObjectOutputStream(out) {
+        override def writeUTF(str: String): Unit = {
+            val bytes = str.getBytes
+            writeLong(bytes.length)
+            write(bytes)
+        }
+    }
+
+    class CustomObjectInputStream(in: InputStream) extends ObjectInputStream(in) {
+        override def readUTF(): String = {
+            val bytes = new Array[Byte](readLong().toByte)
+            read(bytes)
+            new String(bytes)
         }
     }
 }

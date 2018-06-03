@@ -14,7 +14,7 @@ fine... just be willing to revise it!
 Before we can accept pull requests, you will need to agree to the
 Typesafe Contributor License Agreement online, using your GitHub
 account - it takes 30 seconds.  You can do this at
-http://www.typesafe.com/contribute/cla
+https://www.lightbend.com/contribute/cla
 
 Expect that most PRs will need revision before merge. If people
 suggest revisions, you can make them yourself or wait for a
@@ -31,7 +31,8 @@ Here are the steps, which should be automated but aren't (PR
 welcome!):
 
   1. write release notes in NEWS.md following the format
-     already in there. commit.
+     already in there. update README with the new version.
+     Commit.
   2. create a signed git tag "vX.Y.Z"
   3. start sbt; `show version` should confirm that the version was
      taken from the tag
@@ -52,8 +53,8 @@ welcome!):
       (latest/api should be mostly just changed timestamps)
   14. push gh-pages
   15. log into sonatype website and go through the usual hoops
-      (search for com.typesafe, verify the artifacts in it, close,
-      release)
+      (under Staging Repositories, search for com.typesafe, verify the
+      artifacts in it, close, release)
   16. push the "vX.Y.Z" tag
   17. announce release, possibly wait for maven central to sync
       first

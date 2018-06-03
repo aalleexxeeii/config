@@ -10,6 +10,7 @@ import com.typesafe.config.ConfigException
 import com.typesafe.config.ConfigResolveOptions
 import com.typesafe.config.Config
 import com.typesafe.config.ConfigFactory
+import scala.collection.JavaConverters._
 
 class ConfigSubstitutionTest extends TestUtils {
 
@@ -723,6 +724,35 @@ class ConfigSubstitutionTest extends TestUtils {
         checkNotSerializable(substComplexObject)
     }
 
+    @Test
+    def resolveListFromSystemProps() {
+        val props = parseObject(
+            """
+            |"a": ${testList}
+            """.stripMargin)
+
+        System.setProperty("testList.0", "0")
+        System.setProperty("testList.1", "1")
+        ConfigImpl.reloadSystemPropertiesConfig()
+
+        val resolved = resolve(ConfigFactory.systemProperties().withFallback(props).root.asInstanceOf[AbstractConfigObject])
+
+        assertEquals(List("0", "1"), resolved.getList("a").unwrapped().asScala)
+    }
+
+    @Test
+    def resolveListFromEnvVars() {
+        val props = parseObject(
+            """
+            |"a": ${testList}
+            """.stripMargin)
+
+        //"testList.0" and "testList.1" are defined as envVars in build.sbt
+        val resolved = resolve(props)
+
+        assertEquals(List("0", "1"), resolved.getList("a").unwrapped().asScala)
+    }
+
     // this is a weird test, it used to test fallback to system props which made more sense.
     // Now it just tests that if you override with system props, you can use system props
     // in substitutions.
@@ -739,14 +769,17 @@ class ConfigSubstitutionTest extends TestUtils {
     }
 
     private val substEnvVarObject = {
+        // prefix the names of keys with "key_" to allow us to embed a case sensitive env var name
+        // in the key that wont therefore risk a naming collision with env vars themselves
         parseObject("""
 {
-    "home" : ${?HOME},
-    "pwd" : ${?PWD},
-    "shell" : ${?SHELL},
-    "lang" : ${?LANG},
-    "path" : ${?PATH},
-    "not_here" : ${?NOT_HERE}
+    "key_HOME" : ${?HOME},
+    "key_PWD" : ${?PWD},
+    "key_SHELL" : ${?SHELL},
+    "key_LANG" : ${?LANG},
+    "key_PATH" : ${?PATH},
+    "key_Path" : ${?Path}, // many windows machines use Path rather than PATH
+    "key_NOT_HERE" : ${?NOT_HERE}
 }
 """)
     }
@@ -759,7 +792,8 @@ class ConfigSubstitutionTest extends TestUtils {
 
         var existed = 0
         for (k <- resolved.root.keySet().asScala) {
-            val e = System.getenv(k.toUpperCase());
+            val envVarName = k.replace("key_", "")
+            val e = System.getenv(envVarName)
             if (e != null) {
                 existed += 1
                 assertEquals(e, resolved.getString(k))
@@ -782,7 +816,8 @@ class ConfigSubstitutionTest extends TestUtils {
         // { HOME : null } then ${HOME} should be null.
         val nullsMap = new java.util.HashMap[String, Object]
         for (k <- substEnvVarObject.keySet().asScala) {
-            nullsMap.put(k.toUpperCase(), null);
+            val envVarName = k.replace("key_", "")
+            nullsMap.put(envVarName, null)
         }
         val nulls = ConfigFactory.parseMap(nullsMap, "nulls map")
 
@@ -802,11 +837,12 @@ class ConfigSubstitutionTest extends TestUtils {
 
         values.put("a", substEnvVarObject.relativized(new Path("a")))
 
-        val resolved = resolve(new SimpleConfigObject(fakeOrigin(), values));
+        val resolved = resolve(new SimpleConfigObject(fakeOrigin(), values))
 
         var existed = 0
         for (k <- resolved.getObject("a").keySet().asScala) {
-            val e = System.getenv(k.toUpperCase());
+            val envVarName = k.replace("key_", "")
+            val e = System.getenv(envVarName)
             if (e != null) {
                 existed += 1
                 assertEquals(e, resolved.getConfig("a").getString(k))

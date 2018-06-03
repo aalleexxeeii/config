@@ -30,7 +30,7 @@
       - [Include syntax](#include-syntax)
       - [Include semantics: merging](#include-semantics-merging)
       - [Include semantics: substitution](#include-semantics-substitution)
-      - [Include semantics: missing files](#include-semantics-missing-files)
+      - [Include semantics: missing files and required files](#include-semantics-missing-files-and-required-files)
       - [Include semantics: file formats and extensions](#include-semantics-file-formats-and-extensions)
       - [Include semantics: locating resources](#include-semantics-locating-resources)
     - [Conversion of numerically-indexed objects to arrays](#conversion-of-numerically-indexed-objects-to-arrays)
@@ -47,6 +47,7 @@
     - [Substitution fallback to environment variables](#substitution-fallback-to-environment-variables)
     - [hyphen-separated vs. camelCase](#hyphen-separated-vs-camelcase)
   - [Note on Java properties similarity](#note-on-java-properties-similarity)
+  - [Note on Windows and case sensitivity of environment variables](#note-on-windows-and-case-sensitivity-of-environment-variables)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -108,7 +109,7 @@ the config file to the computer program.
 ## Syntax
 
 Much of this is defined with reference to JSON; you can find the
-JSON spec at http://json.org/ of course.
+JSON spec at https://json.org/ of course.
 
 ### Unchanged from JSON
 
@@ -906,6 +907,7 @@ followed by whitespace and then either:
  - `url()`, `file()`, or `classpath()` surrounding a quoted string
    which is then interpreted as a URL, file, or classpath. The
    string must be quoted, unlike in CSS.
+ - `required()` surrounding one of the above
 
 An include statement can appear in place of an object field.
 
@@ -1031,11 +1033,23 @@ get a value from a system property or from the reference
 configuration. So it's not enough to only look up the "fixed up"
 path, it's necessary to look up the original path as well.
 
-#### Include semantics: missing files
+#### Include semantics: missing files and required files
 
-If an included file does not exist, the include statement should
+By default, if an included file does not exist then the include statement should
 be silently ignored (as if the included file contained only an
 empty object).
+
+If however an included resource is mandatory then the name of the
+included resource may be wrapped with `required()`, in which case
+file parsing will fail with an error if the resource cannot be resolved.
+
+The syntax for this is
+
+    include required("foo.conf")
+    include required(file("foo.conf"))
+    include required(classpath("foo.conf"))
+    include required(url("http://localhost/foo.conf"))
+
 
 Other IO errors probably should not be ignored but implementations
 will have to make a judgment which IO errors reflect an ignorable
@@ -1282,7 +1296,27 @@ must be lowercase. Exactly these strings are supported:
  - `m`, `minute`, `minutes`
  - `h`, `hour`, `hours`
  - `d`, `day`, `days`
+ 
+### Period Format
+ 
+Similar to the `getDuration()` method, there is a `getPeriod()` method 
+available for getting time units as a `java.time.Period`. 
 
+This can use the general "units format" described above; bare
+numbers are taken to be in days, while strings are
+parsed as a number plus an optional unit string.
+
+The supported unit strings for period are case sensitive and
+must be lowercase. Exactly these strings are supported:
+
+ - `d`, `day`, `days`
+ - `w`, `week`, `weeks`
+ - `m`, `mo`, `month`, `months` (note that if you are using `getTemporal()`
+ which may return either a `java.time.Duration` or a `java.time.Period`
+ you will want to use `mo` rather than `m` to prevent your unit being 
+ parsed as minutes)
+ - `y`, `year`, `years`
+ 
 ### Size in bytes format
 
 Implementations may wish to support a `getBytes()` returning a
@@ -1303,7 +1337,7 @@ such that following the standard leads to people being confused.
 Worse, common usage varies based on whether people are talking
 about RAM or disk sizes, and various existing operating systems
 and apps do all kinds of different things.  See
-http://en.wikipedia.org/wiki/Binary_prefix#Deviation_between_powers_of_1024_and_powers_of_1000
+https://en.wikipedia.org/wiki/Binary_prefix#Deviation_between_powers_of_1024_and_powers_of_1000
 for examples. It appears impossible to sort this out without
 causing confusion for someone sometime.
 
@@ -1393,7 +1427,7 @@ way to get rid of default fallback values they don't want.
 
 It may be useful to merge Java properties data with data loaded
 from JSON or HOCON. See the Java properties spec here:
-http://download.oracle.com/javase/7/docs/api/java/util/Properties.html#load%28java.io.Reader%29
+https://docs.oracle.com/javase/8/docs/api/java/util/Properties.html#load-java.io.Reader-
 
 Java properties parse as a one-level map from string keys to
 string values.
@@ -1494,7 +1528,9 @@ environment variables generally are capitalized. This avoids
 naming collisions between environment variables and configuration
 properties. (While on Windows getenv() is generally not
 case-sensitive, the lookup will be case sensitive all the way
-until the env variable fallback lookup is reached.)
+until the env variable fallback lookup is reached).
+
+See also the notes below on Windows and case sensitivity.
 
 An application can explicitly block looking up a substitution in
 the environment by setting a value in the configuration, with the
@@ -1543,3 +1579,47 @@ Differences include but are probably not limited to:
    properties files only recognize comment characters if they
    occur as the first character on the line
  - HOCON interprets `${}` as a substitution
+
+## Note on Windows and case sensitivity of environment variables
+
+HOCON's lookup of environment variable values is always case sensitive, but
+Linux and Windows differ in their handling of case.
+
+Linux allows one to define multiple environment variables with the same
+name but with different case; so both "PATH" and "Path" may be defined
+simultaneously. HOCON's access to these environment variables on Linux
+is straightforward; ie just make sure you define all your vars with the required case.
+
+Windows is more confusing. Windows environment variables names may contain a
+mix of upper and lowercase characters, eg "Path", however Windows does not
+allow one to define multiple instances of the same name but differing in case.
+Whilst accessing env vars in Windows is case insensitive, accessing env vars in
+HOCON is case sensitive.
+So if you know that you HOCON needs "PATH" then you must ensure that
+the variable is defined as "PATH" rather than some other name such as
+"Path" or "path".
+However, Windows does not allow us to change the case of an existing env var; we can't
+simply redefine the var with an upper case name.
+The only way to ensure that your environment variables have the desired case
+is to first undefine all the env vars that you will depend on then redefine
+them with the required case.
+
+For example, the the ambient environment might have this definition ...
+
+```
+set Path=A;B;C
+```
+.. we just don't know. But if the HOCON needs "PATH", then the start script must
+take a precautionary approach and enforce the necessary case as follows ...
+
+```
+set OLDPATH=%PATH%
+set PATH=
+set PATH=%OLDPATH%
+
+%JAVA_HOME%/bin/java ....
+```
+
+You cannot know what ambient environment variables might exist in the ambient environment
+when your program is invoked, nor what case those definitions might have.
+Therefore the only safe thing to do is redefine all the vars you rely on as shown above.

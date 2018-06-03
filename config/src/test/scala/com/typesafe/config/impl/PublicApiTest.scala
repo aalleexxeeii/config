@@ -7,8 +7,7 @@ import org.junit.Assert._
 import org.junit._
 import scala.collection.JavaConverters._
 import com.typesafe.config._
-import java.util.Collections
-import java.util.TreeSet
+import java.util.{ Collections, TimeZone, TreeSet }
 import java.io.File
 import scala.collection.mutable
 import equiv03.SomethingInEquiv03
@@ -17,6 +16,15 @@ import java.net.URL
 import java.time.Duration
 
 class PublicApiTest extends TestUtils {
+
+    @Before
+    def before(): Unit = {
+        // TimeZone.getDefault internally invokes System.setProperty("user.timezone", <default time zone>) and it may
+        // cause flaky tests depending on tests order and jvm options. This method is invoked
+        // eg. by URLConnection.getContentType (it reads headers and gets default time zone).
+        TimeZone.getDefault
+    }
+
     @Test
     def basicLoadAndGet() {
         val conf = ConfigFactory.load("test01")
@@ -275,7 +283,8 @@ class PublicApiTest extends TestUtils {
     private def assertNotFound(e: ConfigException) {
         assertTrue("Message text: " + e.getMessage, e.getMessage.contains("No such") ||
             e.getMessage.contains("not found") ||
-            e.getMessage.contains("were found"))
+            e.getMessage.contains("were found") ||
+            e.getMessage.contains("java.io.FileNotFoundException"))
     }
 
     @Test
@@ -624,6 +633,27 @@ class PublicApiTest extends TestUtils {
     }
 
     @Test
+    def supportsConfigLoadingStrategyAlteration(): Unit = {
+        assertEquals("config.strategy is not set", null, System.getProperty("config.strategy"))
+        System.setProperty("config.strategy", classOf[TestStrategy].getCanonicalName)
+
+        try {
+            val incovationsBeforeTest = TestStrategy.getIncovations()
+            val loaderA1 = new TestClassLoader(this.getClass().getClassLoader(),
+                Map("reference.conf" -> resourceFile("a_1.conf").toURI.toURL()))
+
+            val configA1 = withContextClassLoader(loaderA1) {
+                ConfigFactory.load()
+            }
+            ConfigFactory.load()
+            assertEquals(1, configA1.getInt("a"))
+            assertEquals(2, TestStrategy.getIncovations() - incovationsBeforeTest)
+        } finally {
+            System.clearProperty("config.strategy")
+        }
+    }
+
+    @Test
     def usesContextClassLoaderForApplicationConf() {
         val loaderA1 = new TestClassLoader(this.getClass().getClassLoader(),
             Map("application.conf" -> resourceFile("a_1.conf").toURI.toURL()))
@@ -876,7 +906,7 @@ class PublicApiTest extends TestUtils {
     }
 
     // We would ideally make this case NOT throw an exception but we need to do some work
-    // to get there, see https://github.com/typesafehub/config/issues/160
+    // to get there, see https://github.com/lightbend/config/issues/160
     @Test
     def detectIncludeFromList() {
         val e = intercept[ConfigException.Parse] {
@@ -994,8 +1024,8 @@ class PublicApiTest extends TestUtils {
         assertTrue("invalidate caches works on changed system props sys", sys2 ne sys3)
         assertTrue("invalidate caches works on changed system props conf", conf2 ne conf3)
 
-        assertTrue("invalidate caches doesn't change value if no system prop changes sys", sys1 == sys2)
-        assertTrue("invalidate caches doesn't change value if no system prop changes conf", conf1 == conf2)
+        assertEquals("invalidate caches doesn't change value if no system prop changes sys", sys1, sys2)
+        assertEquals("invalidate caches doesn't change value if no system prop changes conf", conf1, conf2)
 
         assertTrue("test system property is set sys", sys3.hasPath("invalidateCachesTest"))
         assertTrue("test system property is set conf", conf3.hasPath("invalidateCachesTest"))
@@ -1040,7 +1070,7 @@ class PublicApiTest extends TestUtils {
 
     @Test
     def heuristicIncludeChecksClasspath(): Unit = {
-        // from https://github.com/typesafehub/config/issues/188
+        // from https://github.com/lightbend/config/issues/188
         withScratchDirectory("heuristicIncludeChecksClasspath") { dir =>
             val f = new File(dir, "foo.conf")
             writeFile(f, """
@@ -1102,4 +1132,17 @@ include "onclasspath"
         // missing underneath missing
         intercept[ConfigException.Missing] { conf.getIsNull("x.c.y") }
     }
+}
+
+class TestStrategy extends DefaultConfigLoadingStrategy {
+    override def parseApplicationConfig(parseOptions: ConfigParseOptions): Config = {
+        TestStrategy.increment()
+        super.parseApplicationConfig(parseOptions)
+    }
+}
+
+object TestStrategy {
+    private var invocations = 0
+    def getIncovations() = invocations
+    def increment() = invocations += 1
 }

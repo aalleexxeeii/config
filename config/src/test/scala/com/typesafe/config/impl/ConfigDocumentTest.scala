@@ -292,9 +292,9 @@ class ConfigDocumentTest extends TestUtils {
     @Test
     def configDocumentFileParse {
         val configDocument = ConfigDocumentFactory.parseFile(resourceFile("/test03.conf"))
-        val fileReader = new BufferedReader(new FileReader("config/src/test/resources/test03.conf"))
+        val fileReader = new BufferedReader(new FileReader("src/test/resources/test03.conf"))
         var line = fileReader.readLine()
-        var sb = new StringBuilder()
+        val sb = new StringBuilder()
         while (line != null) {
             sb.append(line)
             sb.append("\n")
@@ -302,8 +302,10 @@ class ConfigDocumentTest extends TestUtils {
         }
         fileReader.close()
         val fileText = sb.toString()
-        assertEquals(fileText, configDocument.render())
+        assertEquals(fileText, defaultLineEndingsToUnix(configDocument.render()))
     }
+
+    private def defaultLineEndingsToUnix(s: String): String = s.replaceAll(System.lineSeparator(), "\n")
 
     @Test
     def configDocumentReaderParse {
@@ -438,11 +440,11 @@ class ConfigDocumentTest extends TestUtils {
         assertEquals("a : 1", configDocument.withValueText("a", "1").render)
 
         val mapVal = ConfigValueFactory.fromAnyRef(Map("a" -> 1, "b" -> 2).asJava)
-        assertEquals("a : {\n    # hardcoded value\n    \"a\" : 1,\n    # hardcoded value\n    \"b\" : 2\n}",
+        assertEquals("a : {\n    \"a\" : 1,\n    \"b\" : 2\n}",
             configDocument.withValue("a", mapVal).render)
 
         val arrayVal = ConfigValueFactory.fromAnyRef(List(1, 2).asJava)
-        assertEquals("a : [\n    # hardcoded value\n    1,\n    # hardcoded value\n    2\n]", configDocument.withValue("a", arrayVal).render)
+        assertEquals("a : [\n    1,\n    2\n]", configDocument.withValue("a", arrayVal).render)
     }
 
     @Test
@@ -452,7 +454,7 @@ class ConfigDocumentTest extends TestUtils {
 
         val configVal = ConfigValueFactory.fromAnyRef(Map("a" -> 1, "b" -> 2).asJava)
 
-        assertEquals("{ a : {\n     # hardcoded value\n     \"a\" : 1,\n     # hardcoded value\n     \"b\" : 2\n } }",
+        assertEquals("{ a : {\n     \"a\" : 1,\n     \"b\" : 2\n } }",
             configDocument.withValue("a", configVal).render)
     }
 }

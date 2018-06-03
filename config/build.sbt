@@ -4,7 +4,6 @@ import de.johoop.jacoco4sbt.JacocoPlugin.jacoco
 import com.typesafe.sbt.SbtScalariform
 import com.typesafe.sbt.SbtScalariform.ScalariformKeys
 import scalariform.formatter.preferences._
-import com.etsy.sbt.Checkstyle._
 
 SbtScalariform.scalariformSettings
 
@@ -15,8 +14,12 @@ ScalariformKeys.preferences in Compile := formatPrefs
 ScalariformKeys.preferences in Test := formatPrefs
 
 fork in test := true
+fork in Test := true
 fork in run := true
 fork in run in Test := true
+
+//env vars for tests
+envVars in Test ++= Map("testList.0" -> "0", "testList.1" -> "1")
 
 autoScalaLibrary := false
 crossPaths := false
@@ -26,14 +29,12 @@ libraryDependencies += "com.novocode" % "junit-interface" % "0.11" % "test"
 
 externalResolvers += "Scala Tools Snapshots" at "http://scala-tools.org/repo-snapshots/"
 
-checkstyleSettings
+checkstyleConfigLocation := CheckstyleConfigLocation.File((baseDirectory.value / "checkstyle-config.xml").toString)
 
-CheckstyleTasks.checkstyleConfig := baseDirectory.value / "checkstyle-config.xml"
-
-CheckstyleTasks.checkstyle in Compile := {
+checkstyle in Compile := {
   val log = streams.value.log
-  (CheckstyleTasks.checkstyle in Compile).value
-  val resultFile = (target in Compile).value / "checkstyle-report.xml"
+  (checkstyle in Compile).value
+  val resultFile = (checkstyleOutputFile in Compile).value
   val results = scala.xml.XML.loadFile(resultFile)
   val errorFiles = results \\ "checkstyle" \\ "file"
 
@@ -61,10 +62,7 @@ CheckstyleTasks.checkstyle in Compile := {
 }
 
 // add checkstyle as a dependency of doc
-doc in Compile := {
-  (CheckstyleTasks.checkstyle in Compile).value
-  (doc in Compile).value
-}
+doc in Compile := ((doc in Compile).dependsOn(checkstyle in Compile)).value
 
 findbugsSettings
 findbugsReportType := Some(ReportType.Html)
@@ -86,7 +84,7 @@ javacOptions in (Compile, doc) ++= Seq("-group", s"Public API (version ${version
 
 javadocSourceBaseUrl := {
   for (gitHead <- com.typesafe.sbt.SbtGit.GitKeys.gitHeadCommit.value)
-    yield s"https://github.com/typesafehub/config/blob/$gitHead/config/src/main/java"
+    yield s"https://github.com/lightbend/config/blob/$gitHead/config/src/main/java"
 }
 
 javaVersionPrefix in javaVersionCheck := Some("1.8")

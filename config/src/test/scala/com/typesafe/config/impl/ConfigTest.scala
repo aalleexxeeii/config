@@ -3,23 +3,16 @@
  */
 package com.typesafe.config.impl
 
+import java.time.temporal.{ ChronoUnit, TemporalUnit }
+
 import org.junit.Assert._
 import org.junit._
-import com.typesafe.config.ConfigValue
-import com.typesafe.config.Config
-import com.typesafe.config.ConfigObject
-import com.typesafe.config.ConfigException
+import com.typesafe.config._
 import java.util.concurrent.TimeUnit
+
 import scala.collection.JavaConverters._
 import com.typesafe.config.ConfigResolveOptions
-import java.io.File
-import java.util.concurrent.TimeUnit.{ SECONDS, NANOSECONDS, MICROSECONDS, MILLISECONDS, MINUTES, DAYS, HOURS }
-import com.typesafe.config.ConfigParseOptions
-import com.typesafe.config.ConfigFactory
-import com.typesafe.config.ConfigMergeable
-import com.typesafe.config.ConfigRenderOptions
-import com.typesafe.config.ConfigSyntax
-import com.typesafe.config.ConfigValueFactory
+import java.util.concurrent.TimeUnit.{ DAYS, HOURS, MICROSECONDS, MILLISECONDS, MINUTES, NANOSECONDS, SECONDS }
 
 class ConfigTest extends TestUtils {
 
@@ -565,6 +558,8 @@ class ConfigTest extends TestUtils {
         assertEquals(42L, conf.getLong("ints.fortyTwoAgain"))
         assertEquals(42.1, conf.getDouble("floats.fortyTwoPointOne"), 1e-6)
         assertEquals(42.1, conf.getDouble("floats.fortyTwoPointOneAgain"), 1e-6)
+        assertEquals(0.33, conf.getDouble("floats.pointThirtyThree"), 1e-6)
+        assertEquals(0.33, conf.getDouble("floats.pointThirtyThreeAgain"), 1e-6)
         assertEquals("abcd", conf.getString("strings.abcd"))
         assertEquals("abcd", conf.getString("strings.abcdAgain"))
         assertEquals("null bar 42 baz true 3.14 hi", conf.getString("strings.concatenated"))
@@ -613,6 +608,9 @@ class ConfigTest extends TestUtils {
         // plain getList should work
         assertEquals(Seq(intValue(1), intValue(2), intValue(3)), conf.getList("arrays.ofInt").asScala)
         assertEquals(Seq(stringValue("a"), stringValue("b"), stringValue("c")), conf.getList("arrays.ofString").asScala)
+
+        // make sure floats starting with a '.' are parsed as strings (they will be converted to double on demand)
+        assertEquals(ConfigValueType.STRING, conf.getValue("floats.pointThirtyThree").valueType())
     }
 
     @Test
@@ -721,10 +719,12 @@ class ConfigTest extends TestUtils {
         // should convert numbers to string
         assertEquals("42", conf.getString("ints.fortyTwo"))
         assertEquals("42.1", conf.getString("floats.fortyTwoPointOne"))
+        assertEquals(".33", conf.getString("floats.pointThirtyThree"))
 
         // should convert string to number
         assertEquals(57, conf.getInt("strings.number"))
         assertEquals(3.14, conf.getDouble("strings.double"), 1e-6)
+        assertEquals(0.33, conf.getDouble("strings.doubleStartingWithDot"), 1e-6)
 
         // should convert strings to boolean
         assertEquals(true, conf.getBoolean("strings.true"))
@@ -768,6 +768,9 @@ class ConfigTest extends TestUtils {
         assertEquals(Seq(asNanos(1), asNanos(2), asNanos(3), asNanos(4)),
             conf.getNanosecondsList("durations.secondsList").asScala)
         assertEquals(500L, conf.getMilliseconds("durations.halfSecond"))
+        assertEquals(4878955355435272204L, conf.getNanoseconds("durations.largeNanos"))
+        assertEquals(4878955355435272204L, conf.getNanoseconds("durations.plusLargeNanos"))
+        assertEquals(-4878955355435272204L, conf.getNanoseconds("durations.minusLargeNanos"))
 
         // get durations as java.time.Duration
         assertEquals(1000L, conf.getDuration("durations.second").toMillis)
@@ -779,8 +782,12 @@ class ConfigTest extends TestUtils {
         assertEquals(Seq(asNanos(1), asNanos(2), asNanos(3), asNanos(4)),
             conf.getDurationList("durations.secondsList").asScala.map(_.toNanos))
         assertEquals(500L, conf.getDuration("durations.halfSecond").toMillis)
+        assertEquals(4878955355435272204L, conf.getDuration("durations.largeNanos").toNanos)
+        assertEquals(4878955355435272204L, conf.getDuration("durations.plusLargeNanos").toNanos)
+        assertEquals(-4878955355435272204L, conf.getDuration("durations.minusLargeNanos").toNanos)
 
         def assertDurationAsTimeUnit(unit: TimeUnit): Unit = {
+            def ns2unit(l: Long) = unit.convert(l, NANOSECONDS)
             def ms2unit(l: Long) = unit.convert(l, MILLISECONDS)
             def s2unit(i: Int) = unit.convert(i, SECONDS)
             assertEquals(ms2unit(1000L), conf.getDuration("durations.second", unit))
@@ -794,6 +801,9 @@ class ConfigTest extends TestUtils {
             assertEquals(ms2unit(500L), conf.getDuration("durations.halfSecond", unit))
             assertEquals(ms2unit(1L), conf.getDuration("durations.millis", unit))
             assertEquals(ms2unit(2L), conf.getDuration("durations.micros", unit))
+            assertEquals(ns2unit(4878955355435272204L), conf.getDuration("durations.largeNanos", unit))
+            assertEquals(ns2unit(4878955355435272204L), conf.getDuration("durations.plusLargeNanos", unit))
+            assertEquals(ns2unit(-4878955355435272204L), conf.getDuration("durations.minusLargeNanos", unit))
         }
 
         assertDurationAsTimeUnit(NANOSECONDS)
@@ -803,6 +813,13 @@ class ConfigTest extends TestUtils {
         assertDurationAsTimeUnit(MINUTES)
         assertDurationAsTimeUnit(HOURS)
         assertDurationAsTimeUnit(DAYS)
+
+        // periods
+        assertEquals(1, conf.getPeriod("periods.day").get(ChronoUnit.DAYS))
+        assertEquals(2, conf.getPeriod("periods.dayAsNumber").getDays)
+        assertEquals(3 * 7, conf.getTemporal("periods.week").get(ChronoUnit.DAYS))
+        assertEquals(5, conf.getTemporal("periods.month").get(ChronoUnit.MONTHS))
+        assertEquals(8, conf.getTemporal("periods.year").get(ChronoUnit.YEARS))
 
         // should get size in bytes
         assertEquals(1024 * 1024L, conf.getBytes("memsizes.meg"))
@@ -851,7 +868,7 @@ class ConfigTest extends TestUtils {
         if (home != null) {
             assertEquals(home, conf.getString("system.home"))
         } else {
-            assertEquals(nullValue, conf.getObject("system").get("home"))
+            assertEquals(null, conf.getObject("system").get("home"))
         }
     }
 
@@ -957,7 +974,7 @@ class ConfigTest extends TestUtils {
         if (home != null) {
             assertEquals(home, conf.getString("test01.system.home"))
         } else {
-            assertEquals(nullValue, conf.getObject("test01.system").get("home"))
+            assertEquals(null, conf.getObject("test01.system").get("home"))
         }
         val concatenated = conf.getString("test01.system.concatenated")
         assertTrue(concatenated.contains("Your Java version"))
@@ -1226,4 +1243,70 @@ class ConfigTest extends TestUtils {
         val resolved = unresolved.resolveWith(source)
         assertEquals(43, resolved.getInt("foo"))
     }
+
+    /**
+     * A resolver that replaces paths that start with a particular prefix with
+     * strings where that prefix has been replaced with another prefix.
+     */
+    class DummyResolver(prefix: String, newPrefix: String, fallback: ConfigResolver) extends ConfigResolver {
+
+        override def lookup(path: String): ConfigValue = {
+            if (path.startsWith(prefix))
+                ConfigValueFactory.fromAnyRef(newPrefix + path.substring(prefix.length))
+            else if (fallback != null)
+                fallback.lookup(path)
+            else
+                null
+        }
+
+        override def withFallback(f: ConfigResolver): ConfigResolver = {
+            if (fallback == null)
+                new DummyResolver(prefix, newPrefix, f)
+            else
+                new DummyResolver(prefix, newPrefix, fallback.withFallback(f))
+        }
+
+    }
+
+    private def runFallbackTest(expected: String, source: String,
+        allowUnresolved: Boolean, resolvers: ConfigResolver*) = {
+        val unresolved = ConfigFactory.parseString(source)
+        var options = ConfigResolveOptions.defaults().setAllowUnresolved(allowUnresolved)
+        for (resolver <- resolvers)
+            options = options.appendResolver(resolver)
+        val obj = unresolved.resolve(options).root()
+        assertEquals(expected, obj.render(ConfigRenderOptions.concise().setJson(false)))
+    }
+
+    @Test
+    def resolveFallback(): Unit = {
+        runFallbackTest(
+            "x=a,y=b",
+            "x=${a},y=${b}", false,
+            new DummyResolver("", "", null))
+        runFallbackTest(
+            "x=\"a.b.c\",y=\"a.b.d\"",
+            "x=${a.b.c},y=${a.b.d}", false,
+            new DummyResolver("", "", null))
+        runFallbackTest(
+            "x=${a.b.c},y=${a.b.d}",
+            "x=${a.b.c},y=${a.b.d}", true,
+            new DummyResolver("x.", "", null))
+        runFallbackTest(
+            "x=${a.b.c},y=\"e.f\"",
+            "x=${a.b.c},y=${d.e.f}", true,
+            new DummyResolver("d.", "", null))
+        runFallbackTest(
+            "w=\"Y.c.d\",x=${a},y=\"X.b\",z=\"Y.c\"",
+            "x=${a},y=${a.b},z=${a.b.c},w=${a.b.c.d}", true,
+            new DummyResolver("a.b.", "Y.", null),
+            new DummyResolver("a.", "X.", null))
+
+        runFallbackTest("x=${a.b.c}", "x=${a.b.c}", true, new DummyResolver("x.", "", null))
+        val e = intercept[ConfigException.UnresolvedSubstitution] {
+            runFallbackTest("x=${a.b.c}", "x=${a.b.c}", false, new DummyResolver("x.", "", null))
+        }
+        assertTrue(e.getMessage.contains("${a.b.c}"))
+    }
+
 }

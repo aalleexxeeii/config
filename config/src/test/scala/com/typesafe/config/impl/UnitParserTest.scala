@@ -3,6 +3,9 @@
  */
 package com.typesafe.config.impl
 
+import java.time.{ LocalDate, Period }
+import java.time.temporal.ChronoUnit
+
 import org.junit.Assert._
 import org.junit._
 import com.typesafe.config._
@@ -31,16 +34,43 @@ class UnitParserTest extends TestUtils {
         val e = intercept[ConfigException.BadValue] {
             SimpleConfig.parseDuration("100 dollars", fakeOrigin(), "test")
         }
-        assertTrue(e.getMessage().contains("time unit"))
+        assertTrue(e.getMessage.contains("time unit"))
 
         // bad number
         val e2 = intercept[ConfigException.BadValue] {
             SimpleConfig.parseDuration("1 00 seconds", fakeOrigin(), "test")
         }
-        assertTrue(e2.getMessage().contains("duration number"))
+        assertTrue(e2.getMessage.contains("duration number"))
     }
 
-    // https://github.com/typesafehub/config/issues/117
+    @Test
+    def parsePeriod() = {
+        val oneYears = List(
+            "1y", "1 y", "1year", "1 years", "   1y   ", "   1   y    ",
+            "365", "365d", "365 d", "365 days", "   365   days   ", "365day",
+            "12m", "12mo", "12 m", "   12   mo   ", "12 months", "12month")
+        val epochDate = LocalDate.ofEpochDay(0)
+        val oneYear = ChronoUnit.DAYS.between(epochDate, epochDate.plus(Period.ofYears(1)))
+        for (y <- oneYears) {
+            val period = SimpleConfig.parsePeriod(y, fakeOrigin(), "test")
+            val dayCount = ChronoUnit.DAYS.between(epochDate, epochDate.plus(period))
+            assertEquals(oneYear, dayCount)
+        }
+
+        // bad units
+        val e = intercept[ConfigException.BadValue] {
+            SimpleConfig.parsePeriod("100 dollars", fakeOrigin(), "test")
+        }
+        assertTrue(s"${e.getMessage} was not the expected error message", e.getMessage.contains("time unit"))
+
+        // bad number
+        val e2 = intercept[ConfigException.BadValue] {
+            SimpleConfig.parsePeriod("1 00 seconds", fakeOrigin(), "test")
+        }
+        assertTrue(s"${e2.getMessage} was not the expected error message", e2.getMessage.contains("time unit 'seconds'"))
+    }
+
+    // https://github.com/lightbend/config/issues/117
     // this broke because "1d" is a valid double for parseDouble
     @Test
     def parseOneDayAsMilliseconds(): Unit = {
@@ -93,7 +123,7 @@ class UnitParserTest extends TestUtils {
         var result = 1024L * 1024 * 1024
         for (unit <- Seq("tebi", "pebi", "exbi")) {
             val first = unit.substring(0, 1).toUpperCase()
-            result = result * 1024;
+            result = result * 1024
             assertEquals(result, parseMem("1" + first))
             assertEquals(result, parseMem("1" + first + "i"))
             assertEquals(result, parseMem("1" + first + "iB"))
@@ -104,7 +134,7 @@ class UnitParserTest extends TestUtils {
         result = 1000L * 1000 * 1000
         for (unit <- Seq("tera", "peta", "exa")) {
             val first = unit.substring(0, 1).toUpperCase()
-            result = result * 1000;
+            result = result * 1000
             assertEquals(result, parseMem("1" + first + "B"))
             assertEquals(result, parseMem("1" + unit + "byte"))
             assertEquals(result, parseMem("1" + unit + "bytes"))
@@ -114,13 +144,13 @@ class UnitParserTest extends TestUtils {
         val e = intercept[ConfigException.BadValue] {
             SimpleConfig.parseBytes("100 dollars", fakeOrigin(), "test")
         }
-        assertTrue(e.getMessage().contains("size-in-bytes unit"))
+        assertTrue(e.getMessage.contains("size-in-bytes unit"))
 
         // bad number
         val e2 = intercept[ConfigException.BadValue] {
             SimpleConfig.parseBytes("1 00 bytes", fakeOrigin(), "test")
         }
-        assertTrue(e2.getMessage().contains("size-in-bytes number"))
+        assertTrue(e2.getMessage.contains("size-in-bytes number"))
     }
 
     // later on we'll want to check this with BigInteger version of getBytes
